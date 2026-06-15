@@ -463,10 +463,32 @@ a{text-decoration:none;color:inherit}
 .ld-spinner{width:44px;height:44px;border:4px solid var(--border);border-top-color:var(--g);border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .ld-text{font-size:.9rem;font-weight:600;color:var(--muted)}
+/* ============================================================ 写真機能 */
+.photo-upload-area{border:2px dashed var(--border);border-radius:var(--r-md);padding:16px;text-align:center;cursor:pointer;transition:border-color var(--ease);background:var(--bg)}
+.photo-upload-area:hover{border-color:var(--g)}
+.photo-upload-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 18px;background:var(--g-l);color:var(--g-d);border-radius:var(--r-sm);font-size:.85rem;font-weight:600;cursor:pointer;border:1.5px solid var(--g);transition:all var(--ease)}
+.photo-upload-btn:hover{background:var(--g);color:#fff}
+.photo-upload-hint{font-size:.73rem;color:var(--muted);margin-top:5px}
+.photo-preview-grid{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.photo-preview-item{position:relative;width:80px;height:80px;border-radius:var(--r-sm);overflow:hidden;border:1.5px solid var(--border)}
+.photo-preview-item img{width:100%;height:100%;object-fit:cover;display:block}
+.photo-preview-del{position:absolute;top:2px;right:2px;width:20px;height:20px;background:rgba(0,0,0,.55);color:#fff;border-radius:50%;font-size:.6rem;display:flex;align-items:center;justify-content:center;cursor:pointer;border:none;font-family:var(--font)}
+.photo-preview-del:hover{background:var(--red)}
+.compress-loading{display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--muted);margin-top:6px}
+.rec-thumb-wrap{border-radius:var(--r-sm) var(--r-sm) 0 0;overflow:hidden;line-height:0}
+.rec-thumb{width:100%;height:110px;object-fit:cover;display:block;background:var(--g-l)}
+.photo-gallery{display:flex;gap:8px;overflow-x:auto;padding:4px 0 6px;-webkit-overflow-scrolling:touch;scroll-snap-type:x mandatory}
+.photo-gallery::-webkit-scrollbar{height:3px}
+.photo-gallery::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.photo-gallery img{width:160px;height:120px;object-fit:cover;border-radius:var(--r-sm);flex-shrink:0;scroll-snap-align:start;cursor:zoom-in;transition:opacity var(--ease)}
+.photo-gallery img:hover{opacity:.85}
+#photo-lightbox{position:fixed;inset:0;z-index:99997;background:rgba(0,0,0,.92);display:none;align-items:center;justify-content:center;cursor:zoom-out}
+#photo-lightbox img{max-width:95vw;max-height:90vh;object-fit:contain;border-radius:var(--r-sm)}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
+<div class="app">
 
 <!-- ロック画面 -->
 <div id="lock-screen">
@@ -816,6 +838,20 @@ a{text-decoration:none;color:inherit}
           <button class="url-confirm" onclick="testUrl('f-url')">確認</button>
         </div>
       </div>
+      <div class="form-group full photo-form-section">
+        <label>写真（最大3枚）</label>
+        <div class="photo-upload-area" onclick="document.getElementById('f-photos').click()">
+          <span class="photo-upload-btn">📷 写真を追加</span>
+          <div class="photo-upload-hint">タップして選択・カメラ撮影も可</div>
+          <input type="file" id="f-photos" accept="image/*" multiple style="display:none"
+            onchange="onRegPhotoChange(event)"/>
+        </div>
+        <div id="reg-compress-status" class="compress-loading" style="display:none">
+          <div class="ld-spinner" style="width:18px;height:18px;border-width:2px"></div>
+          <span>圧縮中...</span>
+        </div>
+        <div class="photo-preview-grid" id="reg-photo-previews"></div>
+      </div>
     </div>
     <div class="form-actions">
       <button class="btn btn-primary" onclick="saveRecord()">💾 登録する</button>
@@ -903,34 +939,48 @@ a{text-decoration:none;color:inherit}
 </div>
 
 <div id="toast" style="position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(80px);background:linear-gradient(135deg,#3d2010,#5a3018);color:#fff;padding:12px 24px;border-radius:50px;font-size:.86rem;font-weight:600;box-shadow:0 8px 28px rgba(80,40,10,.35);z-index:9999;transition:transform .35s cubic-bezier(.34,1.56,.64,1);pointer-events:none;white-space:nowrap"></div>
+<div id="photo-lightbox" onclick="this.style.display='none'"><img id="photo-lightbox-img" src="" alt="拡大"/></div>
 
 <script>
 'use strict';
 
 /* ============================================================ ★ 設定（ここを編集してください）★ */
-var SUPABASE_URL  ='https://dmukxhhcezvzwqsicovh.supabase.co';   // SupabaseプロジェクトURL
-var SUPABASE_ANON = 'sb_publishable_G9daZeZ4399Gl7M76r6VXg_Uu0rTR_H';                       // Supabase anon key
-var APP_PASSWORD  = 'iwatsuki';                       // 簡易ロックパスワード
+var SUPABASE_URL  = 'https://YOUR_PROJECT.supabase.co';   // SupabaseプロジェクトURL
+var SUPABASE_ANON = 'YOUR_ANON_KEY';                       // Supabase anon key
+var APP_PASSWORD  = 'dayservice2024';                       // 簡易ロックパスワード
 var AUTH_KEY      = 'ds_auth_v1';                           // sessionStorageキー
 
 /* ============================================================ Supabase クライアント */
 var _sb = null;
+var _cloudMode = false; // Supabase設定済みならtrue、未設定はlocalStorage動作
+
 function initSupabase(){
-  if(!window.supabase){showToast('⚠️ Supabase SDKが読み込まれていません');return;}
-  _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+  if(!window.supabase)return;
+  if(SUPABASE_URL.indexOf('YOUR_PROJECT')>=0||SUPABASE_ANON.indexOf('YOUR_ANON')>=0){
+    _cloudMode=false;return; // 未設定 → localStorageモード
+  }
+  try{
+    _sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON);
+    _cloudMode=true;
+  }catch(e){
+    console.error('[supabase] init error',e);
+    _cloudMode=false;
+  }
 }
 
 /* ============================================================ 認証 */
+function _ssGet(k){try{return sessionStorage.getItem(k);}catch(e){return null;}}
+function _ssSet(k,v){try{sessionStorage.setItem(k,v);}catch(e){}}
+function _ssRemove(k){try{sessionStorage.removeItem(k);}catch(e){}}
 function checkAuth(){
-  if(sessionStorage.getItem(AUTH_KEY)==='1'){showApp();}
-  // ロック画面はデフォルト表示なのでelseは不要
+  if(_ssGet(AUTH_KEY)==='1'){showApp();}
 }
 function tryUnlock(){
   var pw=document.getElementById('lock-pw').value;
   if(pw===APP_PASSWORD){
-    sessionStorage.setItem(AUTH_KEY,'1');
     document.getElementById('lock-screen').style.display='none';
     document.getElementById('lock-err').style.display='none';
+    _ssSet(AUTH_KEY,'1');
     showApp();
   }else{
     document.getElementById('lock-err').style.display='block';
@@ -939,7 +989,7 @@ function tryUnlock(){
   }
 }
 function lockApp(){
-  sessionStorage.removeItem(AUTH_KEY);
+  _ssRemove(AUTH_KEY);
   document.getElementById('lock-screen').style.display='flex';
   document.getElementById('lock-pw').value='';
   document.getElementById('lock-err').style.display='none';
@@ -947,9 +997,15 @@ function lockApp(){
 function showApp(){
   initSupabase();
   document.getElementById('app-wrap').style.display='';
-  showLoading(true);
+  if(_cloudMode){showLoading(true);}
   loadAll().then(function(){
-    showLoading(false);
+    if(_cloudMode){showLoading(false);}
+    renderAll();
+    renderSidebar();
+  }).catch(function(e){
+    console.error('[loadAll error]',e);
+    if(_cloudMode){showLoading(false);}
+    _records=[];
     renderAll();
     renderSidebar();
   });
@@ -975,32 +1031,102 @@ var CATS=['🌸 公園・自然','🛍️ ショッピング','🍽️ 飲食・
 var RATINGS=['⭐⭐⭐⭐⭐ とても良かった','⭐⭐⭐⭐ 良かった','⭐⭐⭐ 普通','⭐⭐ やや不満','⭐ 改善が必要'];
 var CAT_EMOJI={'🌸 公園・自然':'🌸','🛍️ ショッピング':'🛍️','🍽️ 飲食・外食':'🍽️','🏛️ 博物館・美術館':'🏛️','⛩️ 神社・寺院':'⛩️','🌊 海・川・湖':'🌊','🎭 イベント・祭り':'🎭','♨️ 温泉・健康':'♨️','🌳 農業・収穫体験':'🌳','🎪 レジャー施設':'🎪','🏥 医療・リハビリ':'🏥','🎓 学習・見学':'🎓'};
 
-/* ============================================================ データキャッシュ（Supabaseから取得した全件をここに保持） */
+/* ============================================================ データキャッシュ */
 var _records = [];
+var _SK = 'dayservice_v8'; // localStorageキー
 function getR(){ return _records; }
 
-/* DB行（snake_case）→ JS オブジェクト（camelCase）*/
+/* localStorageに保存するヘルパー */
+function _localSave(){
+  try{localStorage.setItem(_SK,JSON.stringify(_records));return true;}
+  catch(e){showToast('⚠️ 保存失敗（容量不足の可能性）');return false;}
+}
+
+/* ============================================================ IndexedDB（ローカル写真保存） */
+var _idb = null;
+var _localPhotoCache = {}; // {photoId: objectUrl}
+function _openIDB(){
+  return new Promise(function(resolve,reject){
+    if(_idb){resolve(_idb);return;}
+    var req=indexedDB.open('ds_photos_v1',1);
+    req.onupgradeneeded=function(e){e.target.result.createObjectStore('photos',{keyPath:'id'});};
+    req.onsuccess=function(e){_idb=e.target.result;resolve(_idb);};
+    req.onerror=function(e){reject(e.target.error);};
+  });
+}
+function _idbSave(id,blob){
+  return _openIDB().then(function(db){
+    return new Promise(function(resolve,reject){
+      var tx=db.transaction('photos','readwrite');
+      tx.objectStore('photos').put({id:id,blob:blob});
+      tx.oncomplete=function(){resolve();};
+      tx.onerror=function(e){reject(e.target.error);};
+    });
+  });
+}
+function _idbGet(id){
+  return _openIDB().then(function(db){
+    return new Promise(function(resolve){
+      var req=db.transaction('photos','readonly').objectStore('photos').get(id);
+      req.onsuccess=function(e){resolve(e.target.result?e.target.result.blob:null);};
+      req.onerror=function(){resolve(null);};
+    });
+  });
+}
+function _idbDelete(id){
+  return _openIDB().then(function(db){
+    return new Promise(function(resolve){
+      var tx=db.transaction('photos','readwrite');
+      tx.objectStore('photos').delete(id);
+      tx.oncomplete=function(){resolve();};
+      tx.onerror=function(){resolve();};
+    });
+  }).catch(function(){});
+}
+async function _preloadLocalPhotos(){
+  var ids=[];
+  _records.forEach(function(r){(r.photo_urls||[]).forEach(function(u){if(u&&u.startsWith('local://')){ids.push(u.slice(8));}});});
+  for(var i=0;i<ids.length;i++){
+    var id=ids[i];
+    if(_localPhotoCache[id])continue;
+    try{var blob=await _idbGet(id);if(blob)_localPhotoCache[id]=URL.createObjectURL(blob);}
+    catch(e){console.error('[photo] preload',e);}
+  }
+}
+function resolvePhotoUrl(url){
+  if(!url)return null;
+  if(url.startsWith('local://')){return _localPhotoCache[url.slice(8)]||null;}
+  return url;
+}
+
+/* DB行（snake_case）→ JS オブジェクト（camelCase） ※localStorageデータもそのまま通せる */
 function dbToJs(row){
   return{id:row.id,date:row.date,place:row.place,parking:row.parking||'',
     cost:row.cost||'',rating:row.rating||'',staff:row.staff||'',
     tags:row.tags||[],note:row.note||'',url:row.url||'',
-    favorite:!!row.favorite,createdAt:row.created_at};
+    favorite:!!row.favorite,
+    createdAt:row.created_at||row.createdAt||'',
+    photo_urls:Array.isArray(row.photo_urls)?row.photo_urls.filter(Boolean):[]};
 }
 
-/* Supabaseから全件取得してキャッシュを更新 */
+/* 全件取得（localStorageまたはSupabase） */
 async function loadAll(){
-  if(!_sb)return;
+  if(!_cloudMode){
+    try{_records=JSON.parse(localStorage.getItem(_SK)||'[]').map(dbToJs);}
+    catch(e){_records=[];}
+    await _preloadLocalPhotos();
+    return;
+  }
   var res=await _sb.from('recreation_records').select('*')
     .order('date',{ascending:false}).order('created_at',{ascending:false});
   if(res.error){showToast('⚠️ データ取得に失敗しました：'+res.error.message);return;}
   _records=(res.data||[]).map(dbToJs);
 }
 
-/* CRUDの共通後処理：キャッシュ更新 → 再描画 */
+/* CRUDの共通後処理 */
 async function _reload(){
-  showLoading(true);
-  await loadAll();
-  showLoading(false);
+  if(_cloudMode){showLoading(true);await loadAll();showLoading(false);}
+  else{await loadAll();}
   renderAll();renderSidebar();
 }
 
@@ -1036,23 +1162,67 @@ function validateReg(){
 async function saveRecord(){
   var core=validateReg();if(!core)return;
   var tags=Array.from(document.querySelectorAll('input[name="cat"]:checked')).map(function(el){return el.value;});
-  var row={date:core.date,place:core.place,parking:core.parking,
-    cost:document.getElementById('f-cost').value.trim()||null,
-    rating:document.getElementById('f-rating').value||null,
-    staff:document.getElementById('f-staff').value.trim()||null,
-    tags:tags.length?tags:null,
-    note:document.getElementById('f-note').value.trim()||null,
-    url:document.getElementById('f-url').value.trim()||null,
-    favorite:false};
   var btn=document.querySelector('button[onclick="saveRecord()"]');
   if(btn)btn.disabled=true;
   try{
-    var res=await _sb.from('recreation_records').insert(row);
-    if(res.error)throw res.error;
+    if(!_cloudMode){
+      // ── localStorage モード
+      var r={id:Date.now().toString(),date:core.date,place:core.place,parking:core.parking,
+        cost:document.getElementById('f-cost').value.trim()||'',
+        rating:document.getElementById('f-rating').value||'',
+        staff:document.getElementById('f-staff').value.trim()||'',
+        tags:tags,note:document.getElementById('f-note').value.trim()||'',
+        url:document.getElementById('f-url').value.trim()||'',
+        favorite:false,photo_urls:[],createdAt:new Date().toISOString()};
+      // 写真をIndexedDBに保存
+      if(_regPhotos.length){
+        document.getElementById('reg-compress-status').style.display='flex';
+        for(var pi=0;pi<_regPhotos.length;pi++){
+          var pid='photo_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+          try{
+            await _idbSave(pid,_regPhotos[pi].file);
+            _localPhotoCache[pid]=URL.createObjectURL(_regPhotos[pi].file);
+            r.photo_urls.push('local://'+pid);
+          }catch(pe){console.error('[photo] local save',pe);}
+        }
+        document.getElementById('reg-compress-status').style.display='none';
+      }
+      _records.unshift(r);
+      if(_localSave()){showToast('✅ 登録しました：'+r.place);mc('m-reg');resetForm();renderAll();renderSidebar();}
+      return;
+    }
+    // ── Supabase モード
+    var row={date:core.date,place:core.place,parking:core.parking,
+      cost:document.getElementById('f-cost').value.trim()||null,
+      rating:document.getElementById('f-rating').value||null,
+      staff:document.getElementById('f-staff').value.trim()||null,
+      tags:tags.length?tags:null,
+      note:document.getElementById('f-note').value.trim()||null,
+      url:document.getElementById('f-url').value.trim()||null,
+      favorite:false,photo_urls:[]};
+    var photosToUpload=_regPhotos.slice();
+    var ins=await _sb.from('recreation_records').insert(row).select('id').single();
+    if(ins.error)throw ins.error;
+    var recordId=ins.data.id;
+    if(photosToUpload.length){
+      var uploadedUrls=[];
+      try{
+        uploadedUrls=await uploadRecordPhotos(recordId,photosToUpload.map(function(p){return p.file;}));
+      }catch(uploadErr){
+        console.error('[photo] upload failed',uploadErr);
+        for(var i=0;i<uploadedUrls.length;i++) deleteStoragePhoto(uploadedUrls[i]);
+        showToast('⚠️ 写真のアップロードに失敗しました。通信環境を確認してください');
+      }
+      if(uploadedUrls.length){
+        var upd=await _sb.from('recreation_records').update({photo_urls:uploadedUrls}).eq('id',recordId);
+        if(upd.error)console.error('[photo] photo_urls update error',upd.error);
+      }
+    }
     showToast('✅ 登録しました：'+row.place);
     mc('m-reg');resetForm();
     await _reload();
   }catch(e){
+    console.error('[saveRecord]',e);
     showToast('⚠️ 保存に失敗しました。通信環境を確認してください');
     showLoading(false);
   }finally{
@@ -1066,16 +1236,37 @@ function resetForm(){
   ['err-date','err-place','err-parking'].forEach(function(id){document.getElementById(id).classList.remove('visible');});
   ['f-date','f-place'].forEach(function(id){document.getElementById(id).classList.remove('input-error');});
   document.getElementById('f-date').value=todayStr();
+  // 写真プレビューをクリア
+  _regPhotos.forEach(function(p){URL.revokeObjectURL(p.previewUrl);});
+  _regPhotos=[];
+  var prev=document.getElementById('reg-photo-previews');if(prev)prev.innerHTML='';
+  var fi=document.getElementById('f-photos');if(fi)fi.value='';
 }
 async function deleteRecord(id){
   if(!confirm('この記録を削除しますか？'))return;
   try{
+    var rec=_records.find(function(r){return r.id===id;});
+    var photoUrls=rec?normalizePhotoUrls(rec):[];
+    if(!_cloudMode){
+      // ローカル写真をIndexedDBから削除
+      if(rec){(rec.photo_urls||[]).forEach(function(u){
+        if(u&&u.startsWith('local://')){
+          var pid=u.slice(8);
+          _idbDelete(pid);
+          if(_localPhotoCache[pid]){URL.revokeObjectURL(_localPhotoCache[pid]);delete _localPhotoCache[pid];}
+        }
+      });}
+      _records=_records.filter(function(r){return r.id!==id;});
+      _localSave();mc('m-detail');renderAll();renderSidebar();
+      showToast('🗑️ 削除しました');return;
+    }
     var res=await _sb.from('recreation_records').delete().eq('id',id);
     if(res.error)throw res.error;
-    mc('m-detail');
-    await _reload();
+    mc('m-detail');await _reload();
     showToast('🗑️ 削除しました');
+    photoUrls.forEach(function(url){deleteStoragePhoto(url);});
   }catch(e){
+    console.error('[deleteRecord]',e);
     showToast('⚠️ 削除に失敗しました。通信環境を確認してください');
     showLoading(false);
   }
@@ -1084,19 +1275,16 @@ async function toggleFav(id){
   var r=_records.find(function(x){return x.id===id;});
   if(!r)return;
   var newFav=!r.favorite;
-  // 楽観的更新（即座にUI反映）
   r.favorite=newFav;
   renderAll();
   showToast(newFav?'⭐ お気に入りに追加':'☆ お気に入りを解除');
+  if(!_cloudMode){_localSave();renderSidebar();return;}
   try{
     var res=await _sb.from('recreation_records').update({favorite:newFav}).eq('id',id);
     if(res.error)throw res.error;
-    // バックグラウンドで整合性を保つ
     loadAll().then(function(){renderSidebar();});
   }catch(e){
-    // ロールバック
-    r.favorite=!newFav;
-    renderAll();
+    r.favorite=!newFav;renderAll();
     showToast('⚠️ 更新に失敗しました。通信環境を確認してください');
   }
 }
@@ -1105,6 +1293,8 @@ function testUrl(inputId){
   if(!url){showToast('⚠️ URLを入力してください');return;}
   window.open(url,'_blank');
 }
+function fullCalMove(dir){fullCalM+=dir;if(fullCalM<0){fullCalM=11;fullCalY--;}if(fullCalM>11){fullCalM=0;fullCalY++;}renderFullCal();}
+function fullCalToday(){fullCalY=new Date().getFullYear();fullCalM=new Date().getMonth();renderFullCal();}
 
 /* ============================================================ ビュー切り替え */
 var currentView='dashboard';
@@ -1367,7 +1557,12 @@ function buildCard(r){
   var parkTag=r.parking==='yes'?'<span class="tag-pill tag-park-y">🅿️ あり</span>':'<span class="tag-pill tag-park-n">🚫 なし</span>';
   var catTags=(r.tags||[]).slice(0,3).map(function(t){return'<span class="tag-pill tag-cat">'+t+'</span>';}).join('');
   var mapsUrl='https://www.google.com/maps/search/'+encodeURIComponent(r.place);
+  var photos=normalizePhotoUrls(r);
+  var thumbHtml=photos.length
+    ?'<div class="rec-thumb-wrap"><img class="rec-thumb" src="'+esc(photos[0])+'" alt="写真" loading="lazy" onerror="this.parentNode.remove()"/></div>'
+    :'';
   return'<div class="rec-card'+(r.favorite?' is-fav':'')+'" onclick="openDetail(\''+r.id+'\')">'
+    +thumbHtml
     +'<div class="rec-date-box"><div class="m">'+d.month+'月</div><div class="d">'+d.day+'</div><div class="y">'+d.year+'（'+d.weekday+'）</div></div>'
     +'<div class="rec-body">'
       +'<div class="rec-place">📍 '+esc(r.place)+' '+parkTag+(r.rating?'<span style="font-size:.75rem">'+r.rating.slice(0,2)+'</span>':'')+'</div>'
@@ -1503,21 +1698,39 @@ function openDetail(id){
     ['注意点',r.note||'−']
   ];
   var urlHtml=r.url?'<div class="detail-row"><span class="detail-label">公式サイト</span><a class="rec-url-btn" href="'+esc(r.url)+'" target="_blank" rel="noopener">🔗 公式サイトを開く</a></div>':'';
+  // 写真ギャラリー
+  var photos=normalizePhotoUrls(r);
+  var galleryHtml=photos.length
+    ?'<div class="detail-row"><span class="detail-label">写真</span></div>'
+     +'<div class="photo-gallery">'
+     +photos.map(function(u){return'<img src="'+esc(u)+'" alt="写真" loading="lazy" onclick="openLightbox(\''+esc(u)+'\')" onerror="this.style.display=\'none\'"/>';}).join('')
+     +'</div>'
+    :'';
   document.getElementById('detail-content').innerHTML=
+    galleryHtml+
     rows.map(function(row){return'<div class="detail-row"><span class="detail-label">'+row[0]+'</span><span class="detail-value">'+esc(String(row[1]))+'</span></div>';}).join('')+
     urlHtml+
     '<div class="detail-row"><span class="detail-label">地図</span><a class="rec-url-btn" href="'+mapsUrl+'" target="_blank" rel="noopener">🗺️ Google マップ</a></div>';
   mo('m-detail');
 }
+function openLightbox(url){
+  var lb=document.getElementById('photo-lightbox');
+  document.getElementById('photo-lightbox-img').src=url;
+  lb.style.display='flex';
+}
 function editFromDetail(){mc('m-detail');openEditModal(_did);}
 
 /* ============================================================ 編集モーダル */
 var _eid=null;
+// 編集モーダルの写真ステート
+var _editPhotos={existing:[],added:[],removed:[]};
+
 function openEditModal(id){
   var rs=getR(),r=null;
   for(var i=0;i<rs.length;i++)if(rs[i].id===id){r=rs[i];break;}
   if(!r)return;
   _eid=id;
+  _editPhotos={existing:(r.photo_urls||[]).filter(Boolean).slice(),added:[],removed:[]};
   var tagHtml=CATS.map(function(t,i){var ch=(r.tags||[]).indexOf(t)>=0?' checked':'';return'<span><input type="checkbox" id="ec'+i+'" name="ecat" value="'+esc(t)+'"'+ch+'/><label for="ec'+i+'">'+t+'</label></span>';}).join('');
   document.getElementById('edit-grid').innerHTML=
     '<div class="form-group"><label for="e-date">日にち<span class="req">*</span></label><input type="date" id="e-date" value="'+esc(r.date)+'"/></div>'
@@ -1528,32 +1741,154 @@ function openEditModal(id){
     +'<div class="form-group"><label for="e-staff">スタッフ</label><input type="text" id="e-staff" value="'+esc(r.staff)+'" maxlength="40"/></div>'
     +'<div class="form-group full"><label>タグ</label><div class="tag-checks">'+tagHtml+'</div></div>'
     +'<div class="form-group full"><label for="e-note">注意点・メモ</label><textarea id="e-note">'+esc(r.note)+'</textarea></div>'
-    +'<div class="form-group full"><label for="e-url">公式サイト URL</label><div class="url-wrap"><input type="url" id="e-url" value="'+esc(r.url||'')+'" placeholder="例：https://www.example.com"/><button class="url-confirm" onclick="testUrl(\'e-url\')">確認</button></div></div>';
+    +'<div class="form-group full"><label for="e-url">公式サイト URL</label><div class="url-wrap"><input type="url" id="e-url" value="'+esc(r.url||'')+'" placeholder="例：https://www.example.com"/><button class="url-confirm" onclick="testUrl(\'e-url\')">確認</button></div></div>'
+    // 写真セクション
+    +'<div class="form-group full">'
+      +'<label>写真（最大3枚）</label>'
+      +'<div class="photo-preview-grid" id="edit-photo-previews"></div>'
+      +'<div style="margin-top:8px">'
+        +'<div class="photo-upload-area" onclick="document.getElementById(\'e-photos\').click()">'
+          +'<span class="photo-upload-btn">📷 写真を追加</span>'
+          +'<div class="photo-upload-hint">既存の写真は上のバツで削除できます</div>'
+          +'<input type="file" id="e-photos" accept="image/*" multiple style="display:none" onchange="onEditPhotoChange(event)"/>'
+        +'</div>'
+        +'<div id="edit-compress-status" class="compress-loading" style="display:none">'
+          +'<div class="ld-spinner" style="width:18px;height:18px;border-width:2px"></div>'
+          +'<span>圧縮中...</span>'
+        +'</div>'
+      +'</div>'
+    +'</div>';
+  renderEditPhotoPreviews();
   mo('m-edit');
 }
+
+function renderEditPhotoPreviews(){
+  var el=document.getElementById('edit-photo-previews');
+  if(!el)return;
+  var html='';
+  _editPhotos.existing.forEach(function(url,i){
+    var disp=resolvePhotoUrl(url);
+    if(!disp)return;
+    html+='<div class="photo-preview-item">'
+      +'<img src="'+esc(disp)+'" alt="写真" loading="lazy" onerror="this.style.display=\'none\'">'
+      +'<button class="photo-preview-del" onclick="removeEditExisting('+i+')" title="削除">✕</button>'
+    +'</div>';
+  });
+  _editPhotos.added.forEach(function(p,i){
+    html+='<div class="photo-preview-item">'
+      +'<img src="'+p.previewUrl+'" alt="新規写真" loading="lazy">'
+      +'<button class="photo-preview-del" onclick="removeEditAdded('+i+')" title="削除">✕</button>'
+    +'</div>';
+  });
+  el.innerHTML=html;
+}
+function removeEditExisting(idx){
+  var url=_editPhotos.existing.splice(idx,1)[0];
+  if(url)_editPhotos.removed.push(url);
+  renderEditPhotoPreviews();
+}
+function removeEditAdded(idx){
+  var p=_editPhotos.added.splice(idx,1)[0];
+  if(p)URL.revokeObjectURL(p.previewUrl);
+  renderEditPhotoPreviews();
+}
+async function onEditPhotoChange(event){
+  var files=Array.from(event.target.files);
+  event.target.value='';
+  if(!files.length)return;
+  var total=_editPhotos.existing.length+_editPhotos.added.length+files.length;
+  if(total>3){
+    var remaining=3-_editPhotos.existing.length-_editPhotos.added.length;
+    if(remaining<=0){showToast('⚠️ 写真は最大3枚までです');return;}
+    files=files.slice(0,remaining);
+    showToast('⚠️ 写真は最大3枚まで（'+remaining+'枚のみ追加）');
+  }
+  var status=document.getElementById('edit-compress-status');
+  if(status)status.style.display='flex';
+  for(var i=0;i<files.length;i++){
+    try{
+      var compressed=await compressImage(files[i]);
+      _editPhotos.added.push({file:compressed,previewUrl:URL.createObjectURL(compressed)});
+    }catch(e){
+      console.error('[photo] compress error',e);
+      showToast('⚠️ 写真の圧縮に失敗しました：'+files[i].name);
+    }
+  }
+  if(status)status.style.display='none';
+  renderEditPhotoPreviews();
+}
+
 async function saveEdit(){
   var date=document.getElementById('e-date').value.trim();
   var place=document.getElementById('e-place').value.trim();
   var park=document.querySelector('input[name="ep"]:checked');
   if(!date||!place||!park){showToast('⚠️ 日にち・場所・駐車場は必須です');return;}
   var tags=Array.from(document.querySelectorAll('input[name="ecat"]:checked')).map(function(el){return el.value;});
-  var updates={date:date,place:place,parking:park.value,
-    cost:document.getElementById('e-cost').value.trim()||null,
-    rating:document.getElementById('e-rating').value||null,
-    staff:document.getElementById('e-staff').value.trim()||null,
-    tags:tags.length?tags:null,
-    note:document.getElementById('e-note').value.trim()||null,
-    url:document.getElementById('e-url').value.trim()||null,
-    updated_at:new Date().toISOString()};
   var btn=document.querySelector('button[onclick="saveEdit()"]');
   if(btn)btn.disabled=true;
   try{
+    if(!_cloudMode){
+      // ── localStorage モード
+      var idx=-1;
+      for(var i=0;i<_records.length;i++)if(_records[i].id===_eid){idx=i;break;}
+      if(idx===-1)return;
+      // 削除された写真をIndexedDBから消す
+      _editPhotos.removed.forEach(function(u){
+        if(u&&u.startsWith('local://')){
+          var pid=u.slice(8);
+          _idbDelete(pid);
+          if(_localPhotoCache[pid]){URL.revokeObjectURL(_localPhotoCache[pid]);delete _localPhotoCache[pid];}
+        }
+      });
+      // 追加された写真をIndexedDBに保存
+      var curUrls=_editPhotos.existing.slice();
+      if(_editPhotos.added.length){
+        document.getElementById('edit-compress-status').style.display='flex';
+        for(var pi=0;pi<_editPhotos.added.length;pi++){
+          var pid='photo_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+          try{
+            await _idbSave(pid,_editPhotos.added[pi].file);
+            _localPhotoCache[pid]=URL.createObjectURL(_editPhotos.added[pi].file);
+            curUrls.push('local://'+pid);
+          }catch(pe){console.error('[photo] local save',pe);}
+        }
+        document.getElementById('edit-compress-status').style.display='none';
+      }
+      _records[idx]=Object.assign({},_records[idx],{date:date,place:place,parking:park.value,
+        cost:document.getElementById('e-cost').value.trim()||'',
+        rating:document.getElementById('e-rating').value||'',
+        staff:document.getElementById('e-staff').value.trim()||'',
+        tags:tags,note:document.getElementById('e-note').value.trim()||'',
+        url:document.getElementById('e-url').value.trim()||'',
+        photo_urls:curUrls,updatedAt:new Date().toISOString()});
+      _editPhotos.added.forEach(function(p){URL.revokeObjectURL(p.previewUrl);});
+      _editPhotos={existing:[],added:[],removed:[]};
+      _localSave();mc('m-edit');renderAll();renderSidebar();
+      showToast('✅ 更新しました：'+place);return;
+    }
+    // ── Supabase モード（写真対応）
+    var newUrls=[];
+    if(_editPhotos.added.length){
+      newUrls=await uploadRecordPhotos(_eid,_editPhotos.added.map(function(p){return p.file;}));
+    }
+    var finalPhotoUrls=_editPhotos.existing.concat(newUrls);
+    var updates={date:date,place:place,parking:park.value,
+      cost:document.getElementById('e-cost').value.trim()||null,
+      rating:document.getElementById('e-rating').value||null,
+      staff:document.getElementById('e-staff').value.trim()||null,
+      tags:tags.length?tags:null,
+      note:document.getElementById('e-note').value.trim()||null,
+      url:document.getElementById('e-url').value.trim()||null,
+      photo_urls:finalPhotoUrls,updated_at:new Date().toISOString()};
     var res=await _sb.from('recreation_records').update(updates).eq('id',_eid);
     if(res.error)throw res.error;
-    mc('m-edit');
-    await _reload();
+    mc('m-edit');await _reload();
     showToast('✅ 更新しました：'+place);
+    _editPhotos.removed.forEach(function(url){deleteStoragePhoto(url);});
+    _editPhotos.added.forEach(function(p){URL.revokeObjectURL(p.previewUrl);});
+    _editPhotos={existing:[],added:[],removed:[]};
   }catch(e){
+    console.error('[saveEdit]',e);
     showToast('⚠️ 保存に失敗しました。通信環境を確認してください');
     showLoading(false);
   }finally{
@@ -1627,20 +1962,28 @@ function showImportPreview(){
 }
 async function execImport(){
   var existingPlaces={};_records.forEach(function(r){existingPlaces[r.date+'|'+r.place]=true;});
-  // 重複チェック（場所+日付で判定）
   var newR=_importData.filter(function(r){return!existingPlaces[r.date+'|'+r.place];});
   if(!newR.length){showToast('⚠️ 新しいデータがありません（重複除外済み）');return;}
+  if(!_cloudMode){
+    // localStorageモード
+    var toAdd=newR.map(function(r){
+      return Object.assign({photo_urls:[],createdAt:new Date().toISOString()},r,
+        {id:r.id||Date.now().toString()+Math.random().toString(36).slice(2)});
+    });
+    _records=toAdd.concat(_records).sort(function(a,b){return b.date.localeCompare(a.date);});
+    _localSave();showToast('✅ '+newR.length+'件をインポートしました');
+    cancelImport();renderAll();renderSidebar();return;
+  }
   var rows=newR.map(function(r){
     return{date:r.date,place:r.place,parking:r.parking||null,cost:r.cost||null,
       rating:r.rating||null,staff:r.staff||null,tags:r.tags&&r.tags.length?r.tags:null,
-      note:r.note||null,url:r.url||null,favorite:!!r.favorite};
+      note:r.note||null,url:r.url||null,favorite:!!r.favorite,photo_urls:[]};
   });
   try{
     var res=await _sb.from('recreation_records').insert(rows);
     if(res.error)throw res.error;
     showToast('✅ '+newR.length+'件をインポートしました');
-    cancelImport();
-    await _reload();
+    cancelImport();await _reload();
   }catch(e){
     showToast('⚠️ インポートに失敗しました：'+e.message);
   }
@@ -1664,12 +2007,15 @@ function sendToGAS(){
 async function deleteAll(){
   if(!confirm('全データを削除します。取り消せません。'))return;
   if(!confirm('本当に削除しますか？'))return;
+  if(!_cloudMode){
+    _records=[];localStorage.removeItem(_SK);
+    renderAll();renderSidebar();mc('m-data');
+    showToast('🗑️ 全データを削除しました');return;
+  }
   try{
-    // Supabaseはfilterなしのdeleteを禁止しているのでnot-null filterを使用
     var res=await _sb.from('recreation_records').delete().not('id','is',null);
     if(res.error)throw res.error;
-    _records=[];
-    renderAll();renderSidebar();mc('m-data');
+    _records=[];renderAll();renderSidebar();mc('m-data');
     showToast('🗑️ 全データを削除しました');
   }catch(e){
     showToast('⚠️ 削除に失敗しました：'+e.message);
@@ -1679,6 +2025,121 @@ async function deleteAll(){
 /* ============================================================ サイドバー開閉 */
 function openSidebar(){document.getElementById('sidebar').classList.add('open');document.getElementById('sb-overlay').classList.add('open');}
 function closeSidebar(){document.getElementById('sidebar').classList.remove('open');document.getElementById('sb-overlay').classList.remove('open');}
+
+/* ============================================================ 写真ヘルパー関数 */
+
+// photo_urlsの正規化（null/非配列ガード・ローカルURL解決）
+function normalizePhotoUrls(r){
+  var urls=r&&r.photo_urls;
+  if(!Array.isArray(urls))return[];
+  return urls.filter(function(u){return u&&typeof u==='string';}).map(resolvePhotoUrl).filter(Boolean);
+}
+
+// 登録フォームの写真ステート
+var _regPhotos=[];
+
+// 写真ファイル選択ハンドラ（登録フォーム）
+async function onRegPhotoChange(event){
+  var files=Array.from(event.target.files);
+  event.target.value='';
+  if(!files.length)return;
+  var remaining=3-_regPhotos.length;
+  if(remaining<=0){showToast('⚠️ 写真は最大3枚までです');return;}
+  if(files.length>remaining){
+    showToast('⚠️ 写真は最大3枚まで（'+remaining+'枚のみ追加）');
+    files=files.slice(0,remaining);
+  }
+  var status=document.getElementById('reg-compress-status');
+  if(status)status.style.display='flex';
+  for(var i=0;i<files.length;i++){
+    try{
+      var compressed=await compressImage(files[i]);
+      _regPhotos.push({file:compressed,previewUrl:URL.createObjectURL(compressed)});
+    }catch(e){
+      console.error('[photo] compress error',e);
+      showToast('⚠️ 写真の圧縮に失敗しました：'+files[i].name);
+    }
+  }
+  if(status)status.style.display='none';
+  renderRegPhotoPreviews();
+}
+function renderRegPhotoPreviews(){
+  var el=document.getElementById('reg-photo-previews');
+  if(!el)return;
+  el.innerHTML=_regPhotos.map(function(p,i){
+    return'<div class="photo-preview-item">'
+      +'<img src="'+p.previewUrl+'" alt="写真'+(i+1)+'" loading="lazy">'
+      +'<button class="photo-preview-del" onclick="removeRegPhoto('+i+')" title="削除">✕</button>'
+    +'</div>';
+  }).join('');
+}
+function removeRegPhoto(idx){
+  if(_regPhotos[idx])URL.revokeObjectURL(_regPhotos[idx].previewUrl);
+  _regPhotos.splice(idx,1);
+  renderRegPhotoPreviews();
+}
+
+// Canvas圧縮（最大1280px、JPEG品質0.78）
+function compressImage(file){
+  return new Promise(function(resolve,reject){
+    var MAX=1280,QUALITY=0.78;
+    var reader=new FileReader();
+    reader.onerror=function(){reject(new Error('FileReader error'));};
+    reader.onload=function(ev){
+      var img=new Image();
+      img.onerror=function(){reject(new Error('Image load error'));};
+      img.onload=function(){
+        var w=img.naturalWidth,h=img.naturalHeight;
+        if(w>MAX||h>MAX){var s=Math.min(MAX/w,MAX/h);w=Math.round(w*s);h=Math.round(h*s);}
+        var canvas=document.createElement('canvas');
+        canvas.width=w;canvas.height=h;
+        var ctx=canvas.getContext('2d');
+        ctx.drawImage(img,0,0,w,h);
+        canvas.toBlob(function(blob){
+          if(!blob){reject(new Error('canvas.toBlob failed'));return;}
+          resolve(new File([blob],(file.name||'photo').replace(/\.[^.]+$/,'')+'.jpg',{type:'image/jpeg'}));
+        },'image/jpeg',QUALITY);
+      };
+      img.src=ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// Supabase Storageに写真を一括アップロードしてURL配列を返す
+async function uploadRecordPhotos(recordId,photoFiles){
+  if(!_sb)throw new Error('Supabase not initialized');
+  var urls=[];
+  for(var i=0;i<photoFiles.length;i++){
+    var ts=Date.now(),rnd=Math.random().toString(36).slice(2,7);
+    var path='records/'+recordId+'/'+ts+'_'+rnd+'.jpg';
+    var res=await _sb.storage.from('recreation-photos').upload(path,photoFiles[i],{contentType:'image/jpeg',upsert:false});
+    if(res.error){
+      if(res.error.message&&res.error.message.indexOf('Bucket not found')>=0){
+        throw new Error('BUCKET_NOT_FOUND');
+      }
+      console.error('[photo] upload error',res.error);
+      throw res.error;
+    }
+    var pub=_sb.storage.from('recreation-photos').getPublicUrl(path);
+    urls.push(pub.data.publicUrl);
+  }
+  return urls;
+}
+
+// Supabase Storageから写真を削除（失敗しても例外を投げない）
+async function deleteStoragePhoto(publicUrl){
+  try{
+    var marker='/object/public/recreation-photos/';
+    var idx=publicUrl.indexOf(marker);
+    if(idx<0)return;
+    var filePath=decodeURIComponent(publicUrl.slice(idx+marker.length).split('?')[0]);
+    var res=await _sb.storage.from('recreation-photos').remove([filePath]);
+    if(res.error)console.error('[photo] storage remove error',res.error);
+  }catch(e){
+    console.error('[photo] deleteStoragePhoto error',e);
+  }
+}
 
 /* ============================================================ 挨拶 */
 function setGreeting(){
